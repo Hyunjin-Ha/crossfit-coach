@@ -1,0 +1,18 @@
+# Python
+server/venv/
+server/.env
+backend/.env
+**/__pycache__/
+**/*.pyc
+
+# Node / Expo
+app/node_modules/
+app/.expo/
+app/dist/
+app/web-build/
+frontend/node_modules/
+backend/node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
