@@ -8,6 +8,7 @@ import ChatScreen from "./src/screens/ChatScreen";
 import ProgramScreen from "./src/screens/ProgramScreen";
 import AssessmentScreen from "./src/screens/AssessmentScreen";
 import ProfileScreen from "./src/screens/ProfileScreen";
+import WorkoutScreen from "./src/screens/WorkoutScreen";
 import { colors } from "./src/constants/colors";
 import { FitnessProfile } from "./src/services/api";
 
@@ -44,6 +45,16 @@ function MainTabs({ onReset }: { onReset: () => void }) {
           title: "프로그램",
           tabBarIcon: ({ color }) => (
             <Text style={{ fontSize: 20, color }}>📋</Text>
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Workout"
+        component={WorkoutScreen}
+        options={{
+          title: "운동기록",
+          tabBarIcon: ({ color }) => (
+            <Text style={{ fontSize: 20, color }}>📝</Text>
           ),
         }}
       />

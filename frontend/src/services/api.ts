@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const BASE_URL = "http://localhost:8000";
+const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:8000";
 
 const api = axios.create({ baseURL: BASE_URL });
 
@@ -47,4 +47,30 @@ export async function parseProgram(imageUri: string, mimeType: string) {
     headers: { "Content-Type": "multipart/form-data" },
   });
   return res.data;
+}
+
+export type WorkoutLog = {
+  id: string;
+  created_at: string;
+  date: string;
+  wod_name: string | null;
+  result_type: string | null;
+  result_value: string | null;
+  notes: string | null;
+};
+
+export type WorkoutLogCreate = Omit<WorkoutLog, "id" | "created_at">;
+
+export async function getWorkouts(): Promise<WorkoutLog[]> {
+  const res = await api.get("/workouts");
+  return res.data;
+}
+
+export async function createWorkout(data: WorkoutLogCreate): Promise<WorkoutLog> {
+  const res = await api.post("/workouts", data);
+  return res.data;
+}
+
+export async function deleteWorkout(id: string): Promise<void> {
+  await api.delete(`/workouts/${id}`);
 }

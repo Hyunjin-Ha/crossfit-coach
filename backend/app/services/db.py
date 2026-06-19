@@ -33,3 +33,25 @@ def save_program(raw_text: str, wods: list) -> dict:
 def load_programs(limit: int = 20) -> list[dict]:
     res = get_client().table("programs").select("*").order("created_at", desc=True).limit(limit).execute()
     return res.data
+
+
+def save_workout(data: dict) -> dict:
+    res = get_client().table("workout_logs").insert(data).execute()
+    return res.data[0]
+
+
+def load_workouts(limit: int = 50) -> list[dict]:
+    res = (
+        get_client()
+        .table("workout_logs")
+        .select("*")
+        .order("date", desc=True)
+        .order("created_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return res.data
+
+
+def delete_workout(workout_id: str) -> None:
+    get_client().table("workout_logs").delete().eq("id", workout_id).execute()
