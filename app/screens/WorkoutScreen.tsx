@@ -1,11 +1,10 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, FlatList,
   Modal, TextInput, Alert, ActivityIndicator, ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import * as ImagePicker from 'expo-image-picker';
 import { API_URL } from '../config';
 import { wodStorage } from '../storage';
 
@@ -47,6 +46,7 @@ export default function WorkoutScreen() {
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -76,46 +76,21 @@ export default function WorkoutScreen() {
     setModalVisible(true);
   }
 
-  async function assetToBase64(asset: ImagePicker.ImagePickerAsset): Promise<{ image_base64: string; media_type: string } | null> {
-    if (asset.base64) {
-      return { image_base64: asset.base64, media_type: asset.mimeType ?? 'image/jpeg' };
-    }
-    try {
-      const resp = await fetch(asset.uri);
-      const blob = await resp.blob();
-      return new Promise(resolve => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const dataUrl = reader.result as string;
-          const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
-          resolve(match ? { image_base64: match[2], media_type: match[1] } : null);
-        };
-        reader.onerror = () => resolve(null);
-        reader.readAsDataURL(blob);
-      });
-    } catch {
-      return null;
-    }
+  function fileToBase64(file: File): Promise<{ image_base64: string; media_type: string } | null> {
+    return new Promise(resolve => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+        resolve(match ? { image_base64: match[2], media_type: match[1] } : null);
+      };
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(file);
+    });
   }
 
-  async function handleImagePick() {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsMultipleSelection: true,
-      quality: 0.6,
-      base64: true,
-    });
-    if (result.canceled || result.assets.length === 0) return;
-
+  async function analyzeImages(images: { image_base64: string; media_type: string }[]) {
     setAnalyzing(true);
-    const converted = await Promise.all(result.assets.map(assetToBase64));
-    const images = converted.filter(Boolean) as { image_base64: string; media_type: string }[];
-    if (images.length === 0) {
-      Alert.alert('오류', '이미지를 읽을 수 없습니다');
-      setAnalyzing(false);
-      return;
-    }
-
     try {
       const res = await fetch(`${API_URL}/workouts/from-image`, {
         method: 'POST',
@@ -141,6 +116,32 @@ export default function WorkoutScreen() {
     } finally {
       setAnalyzing(false);
     }
+  }
+
+  function handleImagePick() {
+    if (!fileInputRef.current) {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*';
+      input.multiple = true;
+      input.style.cssText = 'display:none;position:fixed;top:-100px';
+      document.body.appendChild(input);
+      fileInputRef.current = input;
+    }
+    const input = fileInputRef.current;
+    input.value = '';
+    input.onchange = async () => {
+      const files = Array.from(input.files ?? []);
+      if (files.length === 0) return;
+      const converted = await Promise.all(files.map(fileToBase64));
+      const images = converted.filter(Boolean) as { image_base64: string; media_type: string }[];
+      if (images.length === 0) {
+        Alert.alert('오류', '이미지를 읽을 수 없습니다');
+        return;
+      }
+      await analyzeImages(images);
+    };
+    input.click();
   }
 
   async function handleSave() {
