@@ -97,8 +97,7 @@ class ChatRequest(BaseModel):
     device_id: str | None = None
     mode: str = "chat"
     wod_context: str | None = None
-    image_base64: str | None = None
-    image_media_type: str = "image/jpeg"
+    images: list[dict] | None = None
 
 
 class ProfileSaveRequest(BaseModel):
@@ -252,11 +251,13 @@ def chat(request: ChatRequest):
         msgs = []
         for i, m in enumerate(request.messages):
             is_last_user = (i == len(request.messages) - 1 and m.role == "user")
-            if is_last_user and request.image_base64:
-                msgs.append({"role": "user", "content": [
-                    {"type": "image", "source": {"type": "base64", "media_type": request.image_media_type, "data": request.image_base64}},
-                    {"type": "text", "text": m.content or "이 WOD 분석해줘"},
-                ]})
+            if is_last_user and request.images:
+                content = [
+                    {"type": "image", "source": {"type": "base64", "media_type": img.get("image_media_type", "image/jpeg"), "data": img["image_base64"]}}
+                    for img in request.images
+                ]
+                content.append({"type": "text", "text": m.content or "이 WOD 분석해줘"})
+                msgs.append({"role": "user", "content": content})
             else:
                 msgs.append({"role": m.role, "content": m.content})
         return msgs

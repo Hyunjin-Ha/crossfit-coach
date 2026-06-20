@@ -41,7 +41,7 @@ export default function ChatScreen() {
   const [loading, setLoading] = useState(false);
   const [deviceId, setDeviceId] = useState<string | null>(null);
   const [benchmarkSaved, setBenchmarkSaved] = useState(false);
-  const [pendingImage, setPendingImage] = useState<{ uri: string; base64: string; mediaType: string } | null>(null);
+  const [pendingImages, setPendingImages] = useState<{ uri: string; base64: string; mediaType: string }[]>([]);
   const scrollRef = useRef<ScrollView>(null);
   const chatBackupRef = useRef<Message[]>([]);
 
@@ -104,32 +104,39 @@ export default function ChatScreen() {
   }
 
   function handleImageFile(e: any) {
-    const file: File | undefined = e.target.files?.[0];
+    const files: File[] = Array.from(e.target.files ?? []);
     e.target.value = '';
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result as string;
-      const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
-      if (!match) return;
-      setPendingImage({ uri: dataUrl, base64: match[2], mediaType: match[1] });
-    };
-    reader.readAsDataURL(file);
+    if (files.length === 0) return;
+    // 첫 번째 사진은 미리보기용 URI, 나머지는 base64로 일괄 변환
+    const readers = files.map(file => new Promise<{ uri: string; base64: string; mediaType: string } | null>(resolve => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+        resolve(match ? { uri: dataUrl, base64: match[2], mediaType: match[1] } : null);
+      };
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(file);
+    }));
+    Promise.all(readers).then(results => {
+      const valid = results.filter(Boolean) as { uri: string; base64: string; mediaType: string }[];
+      if (valid.length > 0) setPendingImages(valid);
+    });
   }
 
   async function send(text?: string) {
     const content = text ?? input.trim();
-    if ((!content && !pendingImage) || loading) return;
+    if ((!content && pendingImages.length === 0) || loading) return;
 
-    const displayContent = content || '📷 사진을 보냈습니다';
+    const displayContent = content || `📷 사진 ${pendingImages.length}장을 보냈습니다`;
     const userMsg: Message = { id: Date.now().toString(), role: 'user', content: displayContent };
     const assistantId = (Date.now() + 1).toString();
     const withNew = [...messages, userMsg, { id: assistantId, role: 'assistant' as const, content: '' }];
 
-    const imageToSend = pendingImage;
+    const imagesToSend = pendingImages;
     setMessages(withNew);
     setInput('');
-    setPendingImage(null);
+    setPendingImages([]);
     setLoading(true);
 
     try {
@@ -143,7 +150,7 @@ export default function ChatScreen() {
           device_id: deviceId,
           mode,
           ...(latestWod ? { wod_context: latestWod } : {}),
-          ...(imageToSend ? { image_base64: imageToSend.base64, image_media_type: imageToSend.mediaType } : {}),
+          ...(imagesToSend.length > 0 ? { images: imagesToSend.map(i => ({ image_base64: i.base64, image_media_type: i.mediaType })) } : {}),
         }),
       });
       if (!res.body) throw new Error('no body');
@@ -230,13 +237,15 @@ export default function ChatScreen() {
         </View>
       )}
 
-      {pendingImage && (
+      {pendingImages.length > 0 && (
         <View style={styles.imagePreviewRow}>
-          <Image source={{ uri: pendingImage.uri }} style={styles.imagePreview} />
-          <TouchableOpacity onPress={() => setPendingImage(null)} style={styles.imageRemoveBtn}>
+          {pendingImages.map((img, i) => (
+            <Image key={i} source={{ uri: img.uri }} style={styles.imagePreview} />
+          ))}
+          <TouchableOpacity onPress={() => setPendingImages([])} style={styles.imageRemoveBtn}>
             <Ionicons name="close-circle" size={20} color="#aaa" />
           </TouchableOpacity>
-          <Text style={styles.imagePreviewLabel}>사진 첨부됨 — 메시지 전송 시 분석</Text>
+          <Text style={styles.imagePreviewLabel}>사진 {pendingImages.length}장 — 전송 시 분석</Text>
         </View>
       )}
 
@@ -245,7 +254,7 @@ export default function ChatScreen() {
           <View style={styles.cameraBtn}>
             <Ionicons name="camera-outline" size={20} color="#888" />
             {React.createElement('input', {
-              type: 'file', accept: 'image/*',
+              type: 'file', accept: 'image/*', multiple: true,
               onChange: handleImageFile,
               style: { position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' },
             })}
@@ -261,9 +270,9 @@ export default function ChatScreen() {
           onSubmitEditing={() => send()}
         />
         <TouchableOpacity
-          style={[styles.sendBtn, ((!input.trim() && !pendingImage) || loading) && styles.sendBtnDisabled]}
+          style={[styles.sendBtn, ((!input.trim() && pendingImages.length === 0) || loading) && styles.sendBtnDisabled]}
           onPress={() => send()}
-          disabled={(!input.trim() && !pendingImage) || loading}
+          disabled={(!input.trim() && pendingImages.length === 0) || loading}
         >
           <Ionicons name="send" size={18} color="#fff" />
         </TouchableOpacity>
