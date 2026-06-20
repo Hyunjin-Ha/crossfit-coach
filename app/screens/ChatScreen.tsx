@@ -1,7 +1,7 @@
-import { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
-  ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator,
+  ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator, Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { getDeviceId, wodStorage } from '../storage';
@@ -41,6 +41,7 @@ export default function ChatScreen() {
   const [loading, setLoading] = useState(false);
   const [deviceId, setDeviceId] = useState<string | null>(null);
   const [benchmarkSaved, setBenchmarkSaved] = useState(false);
+  const [pendingImage, setPendingImage] = useState<{ uri: string; base64: string; mediaType: string } | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   const chatBackupRef = useRef<Message[]>([]);
 
@@ -102,20 +103,37 @@ export default function ChatScreen() {
     } catch {}
   }
 
+  function handleImageFile(e: any) {
+    const file: File | undefined = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+      if (!match) return;
+      setPendingImage({ uri: dataUrl, base64: match[2], mediaType: match[1] });
+    };
+    reader.readAsDataURL(file);
+  }
+
   async function send(text?: string) {
     const content = text ?? input.trim();
-    if (!content || loading) return;
+    if ((!content && !pendingImage) || loading) return;
 
-    const userMsg: Message = { id: Date.now().toString(), role: 'user', content };
+    const displayContent = content || '📷 사진을 보냈습니다';
+    const userMsg: Message = { id: Date.now().toString(), role: 'user', content: displayContent };
     const assistantId = (Date.now() + 1).toString();
     const withNew = [...messages, userMsg, { id: assistantId, role: 'assistant' as const, content: '' }];
 
+    const imageToSend = pendingImage;
     setMessages(withNew);
     setInput('');
+    setPendingImage(null);
     setLoading(true);
 
     try {
-      const history = [...messages, userMsg].map(m => ({ role: m.role, content: m.content }));
+      const history = [...messages, { role: 'user', content: content || '이 WOD 분석해줘' }];
       const latestWod = wodStorage.load();
       const res = await fetch(`${API_URL}/chat`, {
         method: 'POST',
@@ -125,6 +143,7 @@ export default function ChatScreen() {
           device_id: deviceId,
           mode,
           ...(latestWod ? { wod_context: latestWod } : {}),
+          ...(imageToSend ? { image_base64: imageToSend.base64, image_media_type: imageToSend.mediaType } : {}),
         }),
       });
       if (!res.body) throw new Error('no body');
@@ -211,7 +230,27 @@ export default function ChatScreen() {
         </View>
       )}
 
+      {pendingImage && (
+        <View style={styles.imagePreviewRow}>
+          <Image source={{ uri: pendingImage.uri }} style={styles.imagePreview} />
+          <TouchableOpacity onPress={() => setPendingImage(null)} style={styles.imageRemoveBtn}>
+            <Ionicons name="close-circle" size={20} color="#aaa" />
+          </TouchableOpacity>
+          <Text style={styles.imagePreviewLabel}>사진 첨부됨 — 메시지 전송 시 분석</Text>
+        </View>
+      )}
+
       <View style={styles.inputRow}>
+        {mode === 'chat' && (
+          <View style={styles.cameraBtn}>
+            <Ionicons name="camera-outline" size={20} color="#888" />
+            {React.createElement('input', {
+              type: 'file', accept: 'image/*',
+              onChange: handleImageFile,
+              style: { position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' },
+            })}
+          </View>
+        )}
         <TextInput
           style={styles.input}
           value={input}
@@ -222,9 +261,9 @@ export default function ChatScreen() {
           onSubmitEditing={() => send()}
         />
         <TouchableOpacity
-          style={[styles.sendBtn, (!input.trim() || loading) && styles.sendBtnDisabled]}
+          style={[styles.sendBtn, ((!input.trim() && !pendingImage) || loading) && styles.sendBtnDisabled]}
           onPress={() => send()}
-          disabled={!input.trim() || loading}
+          disabled={(!input.trim() && !pendingImage) || loading}
         >
           <Ionicons name="send" size={18} color="#fff" />
         </TouchableOpacity>
@@ -267,9 +306,23 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: '#2A2A2A',
   },
   quickChipText: { fontSize: 13, color: '#aaa' },
+  imagePreviewRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingHorizontal: 12, paddingTop: 8,
+    borderTopWidth: 1, borderTopColor: '#1A1A1A',
+  },
+  imagePreview: { width: 48, height: 48, borderRadius: 8 },
+  imageRemoveBtn: { padding: 2 },
+  imagePreviewLabel: { color: '#888', fontSize: 12, flex: 1 },
   inputRow: {
-    flexDirection: 'row', alignItems: 'flex-end', gap: 10,
+    flexDirection: 'row', alignItems: 'flex-end', gap: 8,
     padding: 12, borderTopWidth: 1, borderTopColor: '#1A1A1A',
+  },
+  cameraBtn: {
+    width: 42, height: 42, borderRadius: 21,
+    backgroundColor: '#1A1A1A', borderWidth: 1, borderColor: '#2A2A2A',
+    alignItems: 'center', justifyContent: 'center',
+    overflow: 'hidden',
   },
   input: {
     flex: 1, backgroundColor: '#1A1A1A', borderRadius: 22,

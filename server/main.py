@@ -97,6 +97,8 @@ class ChatRequest(BaseModel):
     device_id: str | None = None
     mode: str = "chat"
     wod_context: str | None = None
+    image_base64: str | None = None
+    image_media_type: str = "image/jpeg"
 
 
 class ProfileSaveRequest(BaseModel):
@@ -246,12 +248,25 @@ def chat(request: ChatRequest):
         wod_ctx = f"\n\n[오늘의 WOD]\n{request.wod_context}" if request.wod_context else ""
         system = SYSTEM_PROMPT + (f"\n\n{context}" if context else "") + wod_ctx
 
+    def build_messages():
+        msgs = []
+        for i, m in enumerate(request.messages):
+            is_last_user = (i == len(request.messages) - 1 and m.role == "user")
+            if is_last_user and request.image_base64:
+                msgs.append({"role": "user", "content": [
+                    {"type": "image", "source": {"type": "base64", "media_type": request.image_media_type, "data": request.image_base64}},
+                    {"type": "text", "text": m.content or "이 WOD 분석해줘"},
+                ]})
+            else:
+                msgs.append({"role": m.role, "content": m.content})
+        return msgs
+
     def generate():
         with claude.messages.stream(
             model="claude-sonnet-4-6",
             max_tokens=2048,
             system=system,
-            messages=[{"role": m.role, "content": m.content} for m in request.messages],
+            messages=build_messages(),
         ) as stream:
             for text in stream.text_stream:
                 yield text
