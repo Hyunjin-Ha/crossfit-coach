@@ -209,6 +209,58 @@ def extract_wod_from_image(req: ImageAnalyzeRequest):
     return {"error": "WOD를 찾을 수 없습니다"}
 
 
+MULTI_SESSION_TOOL = {
+    "name": "extract_sessions",
+    "description": "여러 이미지에서 크로스핏 WOD 세션들을 추출한다. 같은 WOD를 여러 각도로 찍은 사진들은 하나의 세션으로 묶고, 서로 다른 WOD 보드는 별도 세션으로 분리한다.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "sessions": {
+                "type": "array",
+                "description": "인식된 WOD 세션 목록. 사진이 같은 WOD면 1개, 다른 WOD면 여러 개.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "wod_name": {"type": ["string", "null"], "description": "WOD 이름"},
+                        "movements": {"type": "string", "description": "운동 동작과 횟수 전체"},
+                        "result_type": {"type": "string", "enum": ["time", "rounds", "weight", "score"]},
+                        "notes": {"type": ["string", "null"], "description": "타임캡, 스케일 등 추가 정보"},
+                    },
+                    "required": ["movements", "result_type"],
+                },
+            }
+        },
+        "required": ["sessions"],
+    },
+}
+
+
+@app.post("/workouts/from-images-sessions")
+def extract_sessions_from_images(req: ImageAnalyzeRequest):
+    content = []
+    for img in req.images:
+        content.append({
+            "type": "image",
+            "source": {"type": "base64", "media_type": img.media_type, "data": img.image_base64},
+        })
+    content.append({
+        "type": "text",
+        "text": "이 사진들에서 크로스핏 WOD 세션을 추출하세요. 같은 WOD 보드를 여러 각도로 찍은 사진들은 하나의 세션으로 묶고, 서로 다른 WOD 보드는 별도 세션으로 분리하세요. extract_sessions 툴을 호출하세요.",
+    })
+
+    response = claude.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=2048,
+        tools=[MULTI_SESSION_TOOL],
+        tool_choice={"type": "tool", "name": "extract_sessions"},
+        messages=[{"role": "user", "content": content}],
+    )
+    for block in response.content:
+        if block.type == "tool_use":
+            return block.input
+    return {"sessions": []}
+
+
 def build_context(profile: dict | None) -> str:
     if not profile or not profile.get("benchmark"):
         return ""

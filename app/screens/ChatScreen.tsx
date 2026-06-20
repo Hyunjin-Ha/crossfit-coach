@@ -183,22 +183,22 @@ export default function ChatScreen() {
       const valid = results.filter(Boolean) as { image_base64: string; media_type: string }[];
       if (valid.length === 0) { setExtracting(false); return; }
       try {
-        // 선택한 사진 전체를 한 번에 → 세션 1개
-        const res = await fetch(`${API_URL}/workouts/from-image`, {
+        // 사진 전체를 한 번에 → Claude가 세션별로 자동 그룹핑
+        const res = await fetch(`${API_URL}/workouts/from-images-sessions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ images: valid }),
         });
         const data = await res.json();
-        if (data.error) { Alert.alert('인식 실패', data.error); return; }
-        const newSession: WodSession = {
+        const newSessions: WodSession[] = (data.sessions ?? []).map((s: any) => ({
           date: todayString(),
-          wod_name: data.wod_name ?? '',
-          result_type: data.result_type ?? 'time',
+          wod_name: s.wod_name ?? '',
+          result_type: s.result_type ?? 'time',
           result_value: '',
-          notes: [data.movements, data.notes].filter(Boolean).join('\n'),
-        };
-        setSessions(prev => [...prev, newSession]);
+          notes: [s.movements, s.notes].filter(Boolean).join('\n'),
+        }));
+        if (newSessions.length === 0) { Alert.alert('인식 실패', 'WOD를 찾을 수 없습니다'); return; }
+        setSessions(prev => [...prev, ...newSessions]);
         setSaveModal(true);
       } catch (err: any) {
         Alert.alert('오류', err?.message ?? 'WOD 인식에 실패했습니다');
