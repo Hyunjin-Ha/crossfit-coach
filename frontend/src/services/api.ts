@@ -74,3 +74,20 @@ export async function createWorkout(data: WorkoutLogCreate): Promise<WorkoutLog>
 export async function deleteWorkout(id: string): Promise<void> {
   await api.delete(`/workouts/${id}`);
 }
+
+export type WodExtracted = {
+  wod_name: string | null;
+  movements: string;
+  result_type: "time" | "rounds" | "weight" | "score";
+  notes: string | null;
+};
+
+export async function extractWodFromImage(
+  imageBase64: string,
+  mediaType: string
+): Promise<WodExtracted> {
+  const res = await api.post("/workouts/from-image", {
+    images: [{ image_base64: imageBase64, media_type: mediaType }],
+  });
+  return res.data;
+}
