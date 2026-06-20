@@ -5,7 +5,9 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
+import * as ImagePicker from 'expo-image-picker';
 import { API_URL } from '../config';
+import { wodStorage } from '../storage';
 
 type WorkoutLog = {
   id: string;
@@ -44,6 +46,7 @@ export default function WorkoutScreen() {
   const [resultValue, setResultValue] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -71,6 +74,45 @@ export default function WorkoutScreen() {
     setResultValue('');
     setNotes('');
     setModalVisible(true);
+  }
+
+  async function handleImagePick() {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.6,
+      base64: true,
+    });
+    if (result.canceled || !result.assets[0].base64) return;
+
+    const asset = result.assets[0];
+    const mediaType = asset.mimeType ?? 'image/jpeg';
+
+    setAnalyzing(true);
+    try {
+      const res = await fetch(`${API_URL}/workouts/from-image`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_base64: asset.base64, media_type: mediaType }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        Alert.alert('인식 실패', data.error);
+        return;
+      }
+      const wodText = [data.movements, data.notes].filter(Boolean).join('\n');
+      wodStorage.save(wodText);
+
+      setDate(todayString());
+      setWodName(data.wod_name ?? '');
+      setResultType(data.result_type ?? 'time');
+      setResultValue('');
+      setNotes(data.movements ?? '');
+      setModalVisible(true);
+    } catch {
+      Alert.alert('오류', '이미지 분석에 실패했습니다');
+    } finally {
+      setAnalyzing(false);
+    }
   }
 
   async function handleSave() {
@@ -122,6 +164,12 @@ export default function WorkoutScreen() {
       <View style={styles.header}>
         <Ionicons name="barbell-outline" size={20} color="#FF6B35" />
         <Text style={styles.headerTitle}>운동 기록</Text>
+        <TouchableOpacity style={styles.photoBtn} onPress={handleImagePick} disabled={analyzing}>
+          {analyzing
+            ? <ActivityIndicator size="small" color="#FF6B35" />
+            : <Ionicons name="camera-outline" size={20} color="#FF6B35" />
+          }
+        </TouchableOpacity>
         <TouchableOpacity style={styles.addBtn} onPress={openModal}>
           <Ionicons name="add" size={20} color="#FF6B35" />
           <Text style={styles.addBtnText}>기록 추가</Text>
@@ -247,6 +295,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: '#1A1A1A',
   },
   headerTitle: { fontSize: 17, fontWeight: '700', color: '#fff', flex: 1 },
+  photoBtn: {
+    width: 36, height: 36, borderRadius: 8,
+    backgroundColor: '#1A1A1A', borderWidth: 1, borderColor: '#2A2A2A',
+    alignItems: 'center', justifyContent: 'center',
+  },
   addBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
     backgroundColor: '#1A1A1A', borderRadius: 8,

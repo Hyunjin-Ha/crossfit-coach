@@ -4,7 +4,7 @@ import {
   ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { getDeviceId } from '../storage';
+import { getDeviceId, wodStorage } from '../storage';
 import { API_URL } from '../config';
 const CHAT_KEY = 'chat_messages';
 
@@ -116,10 +116,16 @@ export default function ChatScreen() {
 
     try {
       const history = [...messages, userMsg].map(m => ({ role: m.role, content: m.content }));
+      const latestWod = wodStorage.load();
       const res = await fetch(`${API_URL}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: history, device_id: deviceId, mode }),
+        body: JSON.stringify({
+          messages: history,
+          device_id: deviceId,
+          mode,
+          ...(latestWod ? { wod_context: latestWod } : {}),
+        }),
       });
       if (!res.body) throw new Error('no body');
 

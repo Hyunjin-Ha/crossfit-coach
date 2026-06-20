@@ -21,6 +21,22 @@ export async function getDeviceId(): Promise<string> {
 // 웹은 localStorage 동기, 네이티브는 AsyncStorage
 const isWeb = typeof localStorage !== 'undefined';
 
+export const WOD_KEY = 'latest_wod';
+
+export const wodStorage = {
+  save(wod: string): void {
+    if (isWeb) {
+      localStorage.setItem(WOD_KEY, wod);
+    } else {
+      AsyncStorage.setItem(WOD_KEY, wod).catch(() => {});
+    }
+  },
+  load(): string | null {
+    if (isWeb) return localStorage.getItem(WOD_KEY);
+    return null;
+  },
+};
+
 export const chatStorage = {
   load(key: string): string | null {
     if (isWeb) return localStorage.getItem(key);

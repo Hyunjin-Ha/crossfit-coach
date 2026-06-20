@@ -95,11 +95,25 @@ class ChatRequest(BaseModel):
     messages: list[Message]
     device_id: str | None = None
     mode: str = "chat"
+    wod_context: str | None = None
 
 
 class ProfileSaveRequest(BaseModel):
     device_id: str
     summary: str
+
+
+class WorkoutLogCreate(BaseModel):
+    date: str
+    wod_name: str | None = None
+    result_type: str | None = None
+    result_value: str | None = None
+    notes: str | None = None
+
+
+class ImageAnalyzeRequest(BaseModel):
+    image_base64: str
+    media_type: str = "image/jpeg"
 
 
 @app.get("/")
@@ -131,6 +145,62 @@ def save_profile(req: ProfileSaveRequest):
     ).execute()
 
     return {"ok": True, "benchmark": benchmark}
+
+
+WOD_EXTRACT_PROMPT = """이 이미지에서 크로스핏 WOD(오늘의 운동) 정보를 추출하세요. JSON만 응답하고 다른 텍스트는 쓰지 마세요.
+
+{
+  "wod_name": "WOD 이름 (예: Fran, Helen, 날짜/코드명) 또는 null",
+  "movements": "운동 동작과 횟수 전체 내용 (예: 21-15-9 Thrusters 43kg, Pull-ups)",
+  "result_type": "time 또는 rounds 또는 weight 또는 score 중 하나",
+  "notes": "타임캡, 스케일 옵션, 추가 정보 등"
+}
+
+WOD를 찾을 수 없으면: {"error": "WOD를 찾을 수 없습니다"}"""
+
+
+@app.get("/workouts")
+def get_workouts():
+    res = supabase.table("workout_logs").select("*").order("date", desc=True).execute()
+    return res.data
+
+
+@app.post("/workouts")
+def create_workout(log: WorkoutLogCreate):
+    res = supabase.table("workout_logs").insert(log.model_dump()).execute()
+    return res.data[0]
+
+
+@app.delete("/workouts/{log_id}")
+def delete_workout(log_id: str):
+    supabase.table("workout_logs").delete().eq("id", log_id).execute()
+    return {"ok": True}
+
+
+@app.post("/workouts/from-image")
+def extract_wod_from_image(req: ImageAnalyzeRequest):
+    response = claude.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=512,
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": req.media_type,
+                        "data": req.image_base64,
+                    },
+                },
+                {"type": "text", "text": WOD_EXTRACT_PROMPT},
+            ],
+        }],
+    )
+    try:
+        return json.loads(response.content[0].text)
+    except Exception:
+        return {"error": "WOD 파싱에 실패했습니다"}
 
 
 def build_context(profile: dict | None) -> str:
@@ -168,7 +238,8 @@ def chat(request: ChatRequest):
         system = BENCHMARK_PROMPT
     else:
         context = build_context(profile)
-        system = SYSTEM_PROMPT + (f"\n\n{context}" if context else "")
+        wod_ctx = f"\n\n[오늘의 WOD]\n{request.wod_context}" if request.wod_context else ""
+        system = SYSTEM_PROMPT + (f"\n\n{context}" if context else "") + wod_ctx
 
     def generate():
         with claude.messages.stream(
