@@ -76,6 +76,28 @@ export default function WorkoutScreen() {
     setModalVisible(true);
   }
 
+  async function assetToBase64(asset: ImagePicker.ImagePickerAsset): Promise<{ image_base64: string; media_type: string } | null> {
+    if (asset.base64) {
+      return { image_base64: asset.base64, media_type: asset.mimeType ?? 'image/jpeg' };
+    }
+    try {
+      const resp = await fetch(asset.uri);
+      const blob = await resp.blob();
+      return new Promise(resolve => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUrl = reader.result as string;
+          const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+          resolve(match ? { image_base64: match[2], media_type: match[1] } : null);
+        };
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      return null;
+    }
+  }
+
   async function handleImagePick() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
@@ -85,12 +107,15 @@ export default function WorkoutScreen() {
     });
     if (result.canceled || result.assets.length === 0) return;
 
-    const images = result.assets
-      .filter(a => a.base64)
-      .map(a => ({ image_base64: a.base64!, media_type: a.mimeType ?? 'image/jpeg' }));
-    if (images.length === 0) return;
-
     setAnalyzing(true);
+    const converted = await Promise.all(result.assets.map(assetToBase64));
+    const images = converted.filter(Boolean) as { image_base64: string; media_type: string }[];
+    if (images.length === 0) {
+      Alert.alert('오류', '이미지를 읽을 수 없습니다');
+      setAnalyzing(false);
+      return;
+    }
+
     try {
       const res = await fetch(`${API_URL}/workouts/from-image`, {
         method: 'POST',
