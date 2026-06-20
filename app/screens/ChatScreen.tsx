@@ -17,6 +17,13 @@ const WELCOME_MSG = {
 
 type Message = { id: string; role: 'user' | 'assistant'; content: string };
 type Mode = 'chat' | 'benchmark_intake';
+type WodSession = {
+  date: string;
+  wod_name: string;
+  result_type: string;
+  result_value: string;
+  notes: string;
+};
 
 const QUICK_PROMPTS = ['오늘 WOD 전략 알려줘', '스케일링 옵션은?', '운동 후 회복 방법', '단백질 섭취 조언'];
 
@@ -60,12 +67,8 @@ export default function ChatScreen() {
   // WOD 저장 관련 상태
   const [extracting, setExtracting] = useState(false);
   const [saveModal, setSaveModal] = useState(false);
-  const [saveDate, setSaveDate] = useState(todayString());
-  const [saveWodName, setSaveWodName] = useState('');
-  const [saveResultType, setSaveResultType] = useState('time');
-  const [saveResultValue, setSaveResultValue] = useState('');
-  const [saveNotes, setSaveNotes] = useState('');
-  const [saving, setSaving] = useState(false);
+  const [sessions, setSessions] = useState<WodSession[]>([]);
+  const [savingAll, setSavingAll] = useState(false);
 
   useEffect(() => {
     if (mode === 'chat' && messages.length > 0) {
@@ -153,13 +156,19 @@ export default function ChatScreen() {
     });
   }
 
-  // WOD 사진 → 운동기록 저장 흐름
+  function updateSession(index: number, field: keyof WodSession, value: string) {
+    setSessions(prev => prev.map((s, i) => i === index ? { ...s, [field]: value } : s));
+  }
+
+  // 이미지 한 장 = 세션 한 개, 병렬 인식 후 카드 목록 표시
   function handleWodImageFile(e: any) {
     const files: File[] = Array.from(e.target.files ?? []);
     e.target.value = '';
     if (files.length === 0) return;
 
     setExtracting(true);
+    const today = todayString();
+
     const readers = files.map(file => new Promise<{ image_base64: string; media_type: string } | null>(resolve => {
       const reader = new FileReader();
       reader.onload = () => {
@@ -174,18 +183,22 @@ export default function ChatScreen() {
       const valid = results.filter(Boolean) as { image_base64: string; media_type: string }[];
       if (valid.length === 0) { setExtracting(false); return; }
       try {
-        const res = await fetch(`${API_URL}/workouts/from-image`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ images: valid }),
-        });
-        const data = await res.json();
-        if (data.error) { Alert.alert('인식 실패', data.error); return; }
-        setSaveDate(todayString());
-        setSaveWodName(data.wod_name ?? '');
-        setSaveResultType(data.result_type ?? 'time');
-        setSaveResultValue('');
-        setSaveNotes([data.movements, data.notes].filter(Boolean).join('\n'));
+        // 이미지마다 별도 API 호출 (병렬)
+        const extracted = await Promise.all(valid.map(img =>
+          fetch(`${API_URL}/workouts/from-image`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ images: [img] }),
+          }).then(r => r.json())
+        ));
+        const newSessions: WodSession[] = extracted.map(data => ({
+          date: today,
+          wod_name: data.wod_name ?? '',
+          result_type: data.result_type ?? 'time',
+          result_value: '',
+          notes: [data.movements, data.notes].filter(Boolean).join('\n'),
+        }));
+        setSessions(newSessions);
         setSaveModal(true);
       } catch (err: any) {
         Alert.alert('오류', err?.message ?? 'WOD 인식에 실패했습니다');
@@ -195,27 +208,28 @@ export default function ChatScreen() {
     });
   }
 
-  async function handleSaveWorkout() {
-    if (!saveDate) return;
-    setSaving(true);
+  async function handleSaveAll() {
+    setSavingAll(true);
     try {
-      await fetch(`${API_URL}/workouts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          date: saveDate,
-          wod_name: saveWodName.trim() || null,
-          result_type: saveResultValue.trim() ? saveResultType : null,
-          result_value: saveResultValue.trim() || null,
-          notes: saveNotes.trim() || null,
-        }),
-      });
+      await Promise.all(sessions.map(s =>
+        fetch(`${API_URL}/workouts`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            date: s.date,
+            wod_name: s.wod_name.trim() || null,
+            result_type: s.result_value.trim() ? s.result_type : null,
+            result_value: s.result_value.trim() || null,
+            notes: s.notes.trim() || null,
+          }),
+        })
+      ));
       setSaveModal(false);
-      Alert.alert('저장 완료', '운동기록 탭에서 확인하세요!');
+      Alert.alert('저장 완료', `${sessions.length}개 세션을 운동기록에 저장했습니다!`);
     } catch {
       Alert.alert('오류', '저장에 실패했습니다');
     } finally {
-      setSaving(false);
+      setSavingAll(false);
     }
   }
 
@@ -285,7 +299,6 @@ export default function ChatScreen() {
     }
   }
 
-  const savePlaceholder = RESULT_TYPES.find(t => t.key === saveResultType)?.placeholder ?? '';
 
   return (
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -401,68 +414,76 @@ export default function ChatScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* WOD 기록 저장 모달 */}
+      {/* WOD 기록 저장 모달 — 세션 카드 목록 */}
       <Modal visible={saveModal} animationType="slide" transparent>
         <View style={styles.overlay}>
           <View style={styles.sheet}>
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-              <Text style={styles.sheetTitle}>WOD 기록 저장</Text>
+              <Text style={styles.sheetTitle}>
+                WOD 세션 {sessions.length}개 인식됨
+              </Text>
 
-              <Text style={styles.label}>날짜</Text>
-              <TextInput
-                style={styles.modalInput}
-                value={saveDate}
-                onChangeText={setSaveDate}
-                placeholder="YYYY-MM-DD"
-                placeholderTextColor="#444"
-              />
+              {sessions.map((s, idx) => (
+                <View key={idx} style={styles.sessionCard}>
+                  <Text style={styles.sessionLabel}>세션 {idx + 1}</Text>
 
-              <Text style={styles.label}>WOD 이름 (선택)</Text>
-              <TextInput
-                style={styles.modalInput}
-                value={saveWodName}
-                onChangeText={setSaveWodName}
-                placeholder="예: Fran, 6월 20일 WOD..."
-                placeholderTextColor="#444"
-              />
+                  <Text style={styles.label}>날짜</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={s.date}
+                    onChangeText={v => updateSession(idx, 'date', v)}
+                    placeholder="YYYY-MM-DD"
+                    placeholderTextColor="#444"
+                  />
 
-              <Text style={styles.label}>인식된 WOD 내용</Text>
-              <TextInput
-                style={[styles.modalInput, styles.modalInputMulti]}
-                value={saveNotes}
-                onChangeText={setSaveNotes}
-                multiline
-                placeholderTextColor="#444"
-              />
+                  <Text style={styles.label}>WOD 이름 (선택)</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={s.wod_name}
+                    onChangeText={v => updateSession(idx, 'wod_name', v)}
+                    placeholder="예: Fran, 오전 WOD..."
+                    placeholderTextColor="#444"
+                  />
 
-              <Text style={styles.label}>결과 유형</Text>
-              <View style={styles.typeRow}>
-                {RESULT_TYPES.map(t => (
-                  <TouchableOpacity
-                    key={t.key}
-                    style={[styles.typeBtn, saveResultType === t.key && styles.typeBtnActive]}
-                    onPress={() => setSaveResultType(t.key)}
-                  >
-                    <Text style={[styles.typeBtnText, saveResultType === t.key && styles.typeBtnTextActive]}>
-                      {t.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+                  <Text style={styles.label}>WOD 내용</Text>
+                  <TextInput
+                    style={[styles.modalInput, styles.modalInputMulti]}
+                    value={s.notes}
+                    onChangeText={v => updateSession(idx, 'notes', v)}
+                    multiline
+                    placeholderTextColor="#444"
+                  />
 
-              <Text style={styles.label}>내 결과 (선택)</Text>
-              <TextInput
-                style={styles.modalInput}
-                value={saveResultValue}
-                onChangeText={setSaveResultValue}
-                placeholder={savePlaceholder}
-                placeholderTextColor="#444"
-              />
+                  <Text style={styles.label}>결과 유형</Text>
+                  <View style={styles.typeRow}>
+                    {RESULT_TYPES.map(t => (
+                      <TouchableOpacity
+                        key={t.key}
+                        style={[styles.typeBtn, s.result_type === t.key && styles.typeBtnActive]}
+                        onPress={() => updateSession(idx, 'result_type', t.key)}
+                      >
+                        <Text style={[styles.typeBtnText, s.result_type === t.key && styles.typeBtnTextActive]}>
+                          {t.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
 
-              <TouchableOpacity style={styles.saveBtn} onPress={handleSaveWorkout} disabled={saving}>
-                {saving
+                  <Text style={styles.label}>내 결과 (선택)</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={s.result_value}
+                    onChangeText={v => updateSession(idx, 'result_value', v)}
+                    placeholder={RESULT_TYPES.find(t => t.key === s.result_type)?.placeholder ?? ''}
+                    placeholderTextColor="#444"
+                  />
+                </View>
+              ))}
+
+              <TouchableOpacity style={styles.saveBtn} onPress={handleSaveAll} disabled={savingAll}>
+                {savingAll
                   ? <ActivityIndicator color="#fff" size="small" />
-                  : <Text style={styles.saveBtnText}>운동기록에 저장</Text>
+                  : <Text style={styles.saveBtnText}>모두 저장 ({sessions.length}개)</Text>
                 }
               </TouchableOpacity>
               <TouchableOpacity style={styles.cancelBtn} onPress={() => setSaveModal(false)}>
@@ -577,4 +598,9 @@ const styles = StyleSheet.create({
   saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
   cancelBtn: { paddingVertical: 14, alignItems: 'center' },
   cancelBtnText: { color: '#555', fontSize: 15 },
+  sessionCard: {
+    borderWidth: 1, borderColor: '#2A2A2A', borderRadius: 16,
+    padding: 16, marginBottom: 16,
+  },
+  sessionLabel: { color: '#FF6B35', fontSize: 13, fontWeight: '700', marginBottom: 4 },
 });
