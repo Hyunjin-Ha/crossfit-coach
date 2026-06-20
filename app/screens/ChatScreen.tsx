@@ -160,14 +160,14 @@ export default function ChatScreen() {
     setSessions(prev => prev.map((s, i) => i === index ? { ...s, [field]: value } : s));
   }
 
-  // 이미지 한 장 = 세션 한 개, 병렬 인식 후 카드 목록 표시
+  // 선택한 사진 묶음 전체 = 세션 1개 (여러 장이어도 하나의 WOD로 인식)
+  // 호출할 때마다 sessions 배열에 append
   function handleWodImageFile(e: any) {
     const files: File[] = Array.from(e.target.files ?? []);
     e.target.value = '';
     if (files.length === 0) return;
 
     setExtracting(true);
-    const today = todayString();
 
     const readers = files.map(file => new Promise<{ image_base64: string; media_type: string } | null>(resolve => {
       const reader = new FileReader();
@@ -183,22 +183,22 @@ export default function ChatScreen() {
       const valid = results.filter(Boolean) as { image_base64: string; media_type: string }[];
       if (valid.length === 0) { setExtracting(false); return; }
       try {
-        // 이미지마다 별도 API 호출 (병렬)
-        const extracted = await Promise.all(valid.map(img =>
-          fetch(`${API_URL}/workouts/from-image`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ images: [img] }),
-          }).then(r => r.json())
-        ));
-        const newSessions: WodSession[] = extracted.map(data => ({
-          date: today,
+        // 선택한 사진 전체를 한 번에 → 세션 1개
+        const res = await fetch(`${API_URL}/workouts/from-image`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ images: valid }),
+        });
+        const data = await res.json();
+        if (data.error) { Alert.alert('인식 실패', data.error); return; }
+        const newSession: WodSession = {
+          date: todayString(),
           wod_name: data.wod_name ?? '',
           result_type: data.result_type ?? 'time',
           result_value: '',
           notes: [data.movements, data.notes].filter(Boolean).join('\n'),
-        }));
-        setSessions(newSessions);
+        };
+        setSessions(prev => [...prev, newSession]);
         setSaveModal(true);
       } catch (err: any) {
         Alert.alert('오류', err?.message ?? 'WOD 인식에 실패했습니다');
@@ -420,12 +420,17 @@ export default function ChatScreen() {
           <View style={styles.sheet}>
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               <Text style={styles.sheetTitle}>
-                WOD 세션 {sessions.length}개 인식됨
+                WOD 세션 {sessions.length}개
               </Text>
 
               {sessions.map((s, idx) => (
                 <View key={idx} style={styles.sessionCard}>
-                  <Text style={styles.sessionLabel}>세션 {idx + 1}</Text>
+                  <View style={styles.sessionCardHeader}>
+                    <Text style={styles.sessionLabel}>세션 {idx + 1}</Text>
+                    <TouchableOpacity onPress={() => setSessions(prev => prev.filter((_, i) => i !== idx))}>
+                      <Ionicons name="close-circle" size={18} color="#555" />
+                    </TouchableOpacity>
+                  </View>
 
                   <Text style={styles.label}>날짜</Text>
                   <TextInput
@@ -480,13 +485,26 @@ export default function ChatScreen() {
                 </View>
               ))}
 
-              <TouchableOpacity style={styles.saveBtn} onPress={handleSaveAll} disabled={savingAll}>
+              {/* 세션 추가 버튼 */}
+              <View style={styles.addSessionBtn}>
+                {extracting
+                  ? <ActivityIndicator size="small" color="#FF6B35" />
+                  : <><Ionicons name="add-circle-outline" size={18} color="#FF6B35" /><Text style={styles.addSessionText}>세션 추가 (사진 선택)</Text></>
+                }
+                {!extracting && React.createElement('input', {
+                  type: 'file', accept: 'image/*', multiple: true,
+                  onChange: handleWodImageFile,
+                  style: { position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' },
+                })}
+              </View>
+
+              <TouchableOpacity style={styles.saveBtn} onPress={handleSaveAll} disabled={savingAll || sessions.length === 0}>
                 {savingAll
                   ? <ActivityIndicator color="#fff" size="small" />
                   : <Text style={styles.saveBtnText}>모두 저장 ({sessions.length}개)</Text>
                 }
               </TouchableOpacity>
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => setSaveModal(false)}>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => { setSaveModal(false); setSessions([]); }}>
                 <Text style={styles.cancelBtnText}>취소</Text>
               </TouchableOpacity>
             </ScrollView>
@@ -602,5 +620,12 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: '#2A2A2A', borderRadius: 16,
     padding: 16, marginBottom: 16,
   },
-  sessionLabel: { color: '#FF6B35', fontSize: 13, fontWeight: '700', marginBottom: 4 },
+  sessionCardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
+  sessionLabel: { color: '#FF6B35', fontSize: 13, fontWeight: '700' },
+  addSessionBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    borderWidth: 1, borderColor: '#FF6B35', borderRadius: 12, borderStyle: 'dashed',
+    paddingVertical: 12, marginBottom: 16, overflow: 'hidden',
+  },
+  addSessionText: { color: '#FF6B35', fontSize: 14, fontWeight: '600' },
 });
