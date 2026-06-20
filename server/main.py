@@ -151,16 +151,20 @@ def save_profile(req: ProfileSaveRequest):
     return {"ok": True, "benchmark": benchmark}
 
 
-WOD_EXTRACT_PROMPT = """이 이미지(들)에서 크로스핏 WOD(오늘의 운동) 정보를 모두 통합해서 추출하세요. 여러 장이면 내용을 합쳐서 하나의 JSON으로 반환하세요. JSON만 응답하고 다른 텍스트는 쓰지 마세요.
-
-{
-  "wod_name": "WOD 이름 (예: Fran, Helen, 날짜/코드명) 또는 null",
-  "movements": "운동 동작과 횟수 전체 내용 (예: 21-15-9 Thrusters 43kg, Pull-ups)",
-  "result_type": "time 또는 rounds 또는 weight 또는 score 중 하나",
-  "notes": "타임캡, 스케일 옵션, 추가 정보 등"
+WOD_EXTRACT_TOOL = {
+    "name": "extract_wod",
+    "description": "이미지에서 크로스핏 WOD 정보를 추출한다",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "wod_name": {"type": ["string", "null"], "description": "WOD 이름 (예: Fran, Helen, 날짜) 또는 null"},
+            "movements": {"type": "string", "description": "운동 동작과 횟수 전체 내용"},
+            "result_type": {"type": "string", "enum": ["time", "rounds", "weight", "score"], "description": "결과 유형"},
+            "notes": {"type": ["string", "null"], "description": "타임캡, 스케일 옵션 등 추가 정보"},
+        },
+        "required": ["movements", "result_type"],
+    },
 }
-
-WOD를 찾을 수 없으면: {"error": "WOD를 찾을 수 없습니다"}"""
 
 
 @app.get("/workouts")
@@ -187,32 +191,21 @@ def extract_wod_from_image(req: ImageAnalyzeRequest):
     for img in req.images:
         content.append({
             "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": img.media_type,
-                "data": img.image_base64,
-            },
+            "source": {"type": "base64", "media_type": img.media_type, "data": img.image_base64},
         })
-    content.append({"type": "text", "text": WOD_EXTRACT_PROMPT})
+    content.append({"type": "text", "text": "이 이미지(들)에서 크로스핏 WOD 정보를 추출해서 extract_wod 툴을 호출하세요."})
 
     response = claude.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=512,
+        max_tokens=1024,
+        tools=[WOD_EXTRACT_TOOL],
+        tool_choice={"type": "required", "name": "extract_wod"},
         messages=[{"role": "user", "content": content}],
     )
-    text = response.content[0].text
-    # 마크다운 코드블록 제거 후 JSON 추출
-    try:
-        return json.loads(text)
-    except Exception:
-        pass
-    match = re.search(r'\{.*\}', text, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group(0))
-        except Exception:
-            pass
-    return {"error": f"파싱 실패: {text[:200]}"}
+    for block in response.content:
+        if block.type == "tool_use":
+            return block.input
+    return {"error": "WOD를 찾을 수 없습니다"}
 
 
 def build_context(profile: dict | None) -> str:
