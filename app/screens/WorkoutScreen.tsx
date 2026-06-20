@@ -235,21 +235,23 @@ export default function WorkoutScreen() {
           keyExtractor={item => item.id}
           contentContainerStyle={styles.list}
           renderItem={({ item }) => (
-            <TouchableOpacity style={styles.card} onPress={() => openEdit(item)} activeOpacity={0.7}>
-              <View style={styles.cardTop}>
-                <Text style={styles.cardDate}>{formatDate(item.date)}</Text>
-                {item.wod_name && <Text style={styles.cardWod}>{item.wod_name}</Text>}
-                <TouchableOpacity onPress={() => confirmDelete(item.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                  <Ionicons name="trash-outline" size={16} color="#555" />
-                </TouchableOpacity>
-              </View>
-              {item.result_value && (
-                <Text style={styles.cardResult}>
-                  {RESULT_TYPES.find(t => t.key === item.result_type)?.label ?? ''} {item.result_value}
-                </Text>
-              )}
-              {item.notes && <Text style={styles.cardNotes} numberOfLines={2}>{item.notes}</Text>}
-            </TouchableOpacity>
+            <View style={styles.card}>
+              <TouchableOpacity style={styles.cardBody} onPress={() => openEdit(item)} activeOpacity={0.7}>
+                <View style={styles.cardTop}>
+                  <Text style={styles.cardDate}>{formatDate(item.date)}</Text>
+                  {item.wod_name && <Text style={styles.cardWod}>{item.wod_name}</Text>}
+                </View>
+                {item.result_value && (
+                  <Text style={styles.cardResult}>
+                    {RESULT_TYPES.find(t => t.key === item.result_type)?.label ?? ''} {item.result_value}
+                  </Text>
+                )}
+                {item.notes && <Text style={styles.cardNotes} numberOfLines={2}>{item.notes}</Text>}
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.trashBtn} onPress={() => confirmDelete(item.id)}>
+                <Ionicons name="trash-outline" size={16} color="#555" />
+              </TouchableOpacity>
+            </View>
           )}
           ListEmptyComponent={
             <View style={styles.emptyBox}>
@@ -366,8 +368,11 @@ const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   list: { padding: 16, gap: 12, paddingBottom: 40 },
   card: {
-    backgroundColor: '#1A1A1A', borderRadius: 16, padding: 16, gap: 6,
+    backgroundColor: '#1A1A1A', borderRadius: 16,
+    flexDirection: 'row', alignItems: 'flex-start',
   },
+  cardBody: { flex: 1, padding: 16, gap: 6 },
+  trashBtn: { padding: 16, justifyContent: 'center' },
   cardTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   cardDate: { color: '#555', fontSize: 13, fontWeight: '600' },
   cardWod: { color: '#fff', fontSize: 15, fontWeight: '700', flex: 1 },
