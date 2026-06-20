@@ -180,6 +180,12 @@ def create_workout(log: WorkoutLogCreate):
     return res.data[0]
 
 
+@app.patch("/workouts/{log_id}")
+def update_workout(log_id: str, log: WorkoutLogCreate):
+    res = supabase.table("workout_logs").update(log.model_dump()).eq("id", log_id).execute()
+    return res.data[0]
+
+
 @app.delete("/workouts/{log_id}")
 def delete_workout(log_id: str):
     supabase.table("workout_logs").delete().eq("id", log_id).execute()

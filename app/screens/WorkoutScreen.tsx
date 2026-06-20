@@ -38,6 +38,7 @@ export default function WorkoutScreen() {
   const [logs, setLogs] = useState<WorkoutLog[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const [date, setDate] = useState(todayString());
   const [wodName, setWodName] = useState('');
@@ -67,12 +68,23 @@ export default function WorkoutScreen() {
     }
   }
 
-  function openModal() {
+  function openNew() {
+    setEditingId(null);
     setDate(todayString());
     setWodName('');
     setResultType('time');
     setResultValue('');
     setNotes('');
+    setModalVisible(true);
+  }
+
+  function openEdit(log: WorkoutLog) {
+    setEditingId(log.id);
+    setDate(log.date);
+    setWodName(log.wod_name ?? '');
+    setResultType(log.result_type ?? 'time');
+    setResultValue(log.result_value ?? '');
+    setNotes(log.notes ?? '');
     setModalVisible(true);
   }
 
@@ -110,6 +122,7 @@ export default function WorkoutScreen() {
 
       wodStorage.save([data.movements, data.notes].filter(Boolean).join('\n'));
       setAnalyzeStatus(null);
+      setEditingId(null);
       setDate(todayString());
       setWodName(data.wod_name ?? '');
       setResultType(data.result_type ?? 'time');
@@ -127,19 +140,31 @@ export default function WorkoutScreen() {
     if (!date) return;
     setSaving(true);
     try {
-      const res = await fetch(`${API_URL}/workouts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          date,
-          wod_name: wodName.trim() || null,
-          result_type: resultValue.trim() ? resultType : null,
-          result_value: resultValue.trim() || null,
-          notes: notes.trim() || null,
-        }),
+      const body = JSON.stringify({
+        date,
+        wod_name: wodName.trim() || null,
+        result_type: resultValue.trim() ? resultType : null,
+        result_value: resultValue.trim() || null,
+        notes: notes.trim() || null,
       });
-      const newLog = await res.json();
-      setLogs(prev => [newLog, ...prev]);
+
+      if (editingId) {
+        const res = await fetch(`${API_URL}/workouts/${editingId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body,
+        });
+        const updated = await res.json();
+        setLogs(prev => prev.map(l => l.id === editingId ? updated : l));
+      } else {
+        const res = await fetch(`${API_URL}/workouts`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body,
+        });
+        const newLog = await res.json();
+        setLogs(prev => [newLog, ...prev]);
+      }
       setModalVisible(false);
     } catch {
       Alert.alert('오류', '저장에 실패했습니다');
@@ -183,7 +208,7 @@ export default function WorkoutScreen() {
             style: { position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' },
           })}
         </View>
-        <TouchableOpacity style={styles.addBtn} onPress={openModal}>
+        <TouchableOpacity style={styles.addBtn} onPress={openNew}>
           <Ionicons name="add" size={20} color="#FF6B35" />
           <Text style={styles.addBtnText}>기록 추가</Text>
         </TouchableOpacity>
@@ -210,11 +235,11 @@ export default function WorkoutScreen() {
           keyExtractor={item => item.id}
           contentContainerStyle={styles.list}
           renderItem={({ item }) => (
-            <View style={styles.card}>
+            <TouchableOpacity style={styles.card} onPress={() => openEdit(item)} activeOpacity={0.7}>
               <View style={styles.cardTop}>
                 <Text style={styles.cardDate}>{formatDate(item.date)}</Text>
                 {item.wod_name && <Text style={styles.cardWod}>{item.wod_name}</Text>}
-                <TouchableOpacity onPress={() => confirmDelete(item.id)}>
+                <TouchableOpacity onPress={() => confirmDelete(item.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                   <Ionicons name="trash-outline" size={16} color="#555" />
                 </TouchableOpacity>
               </View>
@@ -223,8 +248,8 @@ export default function WorkoutScreen() {
                   {RESULT_TYPES.find(t => t.key === item.result_type)?.label ?? ''} {item.result_value}
                 </Text>
               )}
-              {item.notes && <Text style={styles.cardNotes}>{item.notes}</Text>}
-            </View>
+              {item.notes && <Text style={styles.cardNotes} numberOfLines={2}>{item.notes}</Text>}
+            </TouchableOpacity>
           )}
           ListEmptyComponent={
             <View style={styles.emptyBox}>
@@ -240,7 +265,7 @@ export default function WorkoutScreen() {
         <View style={styles.overlay}>
           <View style={styles.sheet}>
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-              <Text style={styles.sheetTitle}>운동 기록 추가</Text>
+              <Text style={styles.sheetTitle}>{editingId ? '기록 수정' : '운동 기록 추가'}</Text>
 
               <Text style={styles.label}>날짜</Text>
               <TextInput
@@ -297,7 +322,7 @@ export default function WorkoutScreen() {
               <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={saving}>
                 {saving
                   ? <ActivityIndicator color="#fff" size="small" />
-                  : <Text style={styles.saveBtnText}>저장</Text>
+                  : <Text style={styles.saveBtnText}>{editingId ? '수정 완료' : '저장'}</Text>
                 }
               </TouchableOpacity>
               <TouchableOpacity style={styles.cancelBtn} onPress={() => setModalVisible(false)}>
