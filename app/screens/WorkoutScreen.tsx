@@ -79,20 +79,23 @@ export default function WorkoutScreen() {
   async function handleImagePick() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
+      allowsMultipleSelection: true,
       quality: 0.6,
       base64: true,
     });
-    if (result.canceled || !result.assets[0].base64) return;
+    if (result.canceled || result.assets.length === 0) return;
 
-    const asset = result.assets[0];
-    const mediaType = asset.mimeType ?? 'image/jpeg';
+    const images = result.assets
+      .filter(a => a.base64)
+      .map(a => ({ image_base64: a.base64!, media_type: a.mimeType ?? 'image/jpeg' }));
+    if (images.length === 0) return;
 
     setAnalyzing(true);
     try {
       const res = await fetch(`${API_URL}/workouts/from-image`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image_base64: asset.base64, media_type: mediaType }),
+        body: JSON.stringify({ images }),
       });
       const data = await res.json();
       if (data.error) {

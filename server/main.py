@@ -111,9 +111,12 @@ class WorkoutLogCreate(BaseModel):
     notes: str | None = None
 
 
-class ImageAnalyzeRequest(BaseModel):
+class ImageItem(BaseModel):
     image_base64: str
     media_type: str = "image/jpeg"
+
+class ImageAnalyzeRequest(BaseModel):
+    images: list[ImageItem]
 
 
 @app.get("/")
@@ -147,7 +150,7 @@ def save_profile(req: ProfileSaveRequest):
     return {"ok": True, "benchmark": benchmark}
 
 
-WOD_EXTRACT_PROMPT = """이 이미지에서 크로스핏 WOD(오늘의 운동) 정보를 추출하세요. JSON만 응답하고 다른 텍스트는 쓰지 마세요.
+WOD_EXTRACT_PROMPT = """이 이미지(들)에서 크로스핏 WOD(오늘의 운동) 정보를 모두 통합해서 추출하세요. 여러 장이면 내용을 합쳐서 하나의 JSON으로 반환하세요. JSON만 응답하고 다른 텍스트는 쓰지 마세요.
 
 {
   "wod_name": "WOD 이름 (예: Fran, Helen, 날짜/코드명) 또는 null",
@@ -179,23 +182,22 @@ def delete_workout(log_id: str):
 
 @app.post("/workouts/from-image")
 def extract_wod_from_image(req: ImageAnalyzeRequest):
+    content = []
+    for img in req.images:
+        content.append({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": img.media_type,
+                "data": img.image_base64,
+            },
+        })
+    content.append({"type": "text", "text": WOD_EXTRACT_PROMPT})
+
     response = claude.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=512,
-        messages=[{
-            "role": "user",
-            "content": [
-                {
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": req.media_type,
-                        "data": req.image_base64,
-                    },
-                },
-                {"type": "text", "text": WOD_EXTRACT_PROMPT},
-            ],
-        }],
+        messages=[{"role": "user", "content": content}],
     )
     try:
         return json.loads(response.content[0].text)
