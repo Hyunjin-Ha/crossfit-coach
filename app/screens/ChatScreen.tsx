@@ -377,7 +377,7 @@ export default function ChatScreen() {
               : <Ionicons name="clipboard-outline" size={20} color="#FF6B35" />
             }
             {!extracting && React.createElement('input', {
-              type: 'file', accept: 'image/*',
+              type: 'file', accept: 'image/*', multiple: true,
               onChange: handleWodImageFile,
               style: { position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' },
             })}
