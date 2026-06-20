@@ -173,21 +173,14 @@ export default function WorkoutScreen() {
     }
   }
 
-  function confirmDelete(id: string) {
-    Alert.alert('삭제', '이 기록을 삭제할까요?', [
-      { text: '취소', style: 'cancel' },
-      {
-        text: '삭제', style: 'destructive',
-        onPress: async () => {
-          try {
-            await fetch(`${API_URL}/workouts/${id}`, { method: 'DELETE' });
-            setLogs(prev => prev.filter(l => l.id !== id));
-          } catch {
-            Alert.alert('오류', '삭제에 실패했습니다');
-          }
-        },
-      },
-    ]);
+  async function confirmDelete(id: string) {
+    if (!window.confirm('이 기록을 삭제할까요?')) return;
+    try {
+      await fetch(`${API_URL}/workouts/${id}`, { method: 'DELETE' });
+      setLogs(prev => prev.filter(l => l.id !== id));
+    } catch {
+      window.alert('삭제에 실패했습니다');
+    }
   }
 
   const placeholder = RESULT_TYPES.find(t => t.key === resultType)?.placeholder ?? '';
@@ -372,7 +365,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'flex-start',
   },
   cardBody: { flex: 1, padding: 16, gap: 6 },
-  trashBtn: { padding: 16, justifyContent: 'center' },
+  trashBtn: { width: 48, alignItems: 'center', justifyContent: 'center' },
   cardTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   cardDate: { color: '#555', fontSize: 13, fontWeight: '600' },
   cardWod: { color: '#fff', fontSize: 15, fontWeight: '700', flex: 1 },
