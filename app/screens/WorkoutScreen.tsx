@@ -46,6 +46,7 @@ export default function WorkoutScreen() {
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  const [analyzeStatus, setAnalyzeStatus] = useState<string | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -81,6 +82,7 @@ export default function WorkoutScreen() {
     if (files.length === 0) return;
 
     setAnalyzing(true);
+    setAnalyzeStatus('사진 분석 중...');
     try {
       const images = await Promise.all(files.map(file => new Promise<{ image_base64: string; media_type: string } | null>(resolve => {
         const reader = new FileReader();
@@ -92,25 +94,30 @@ export default function WorkoutScreen() {
         reader.readAsDataURL(file);
       })));
       const valid = images.filter(Boolean) as { image_base64: string; media_type: string }[];
-      if (valid.length === 0) { Alert.alert('오류', '이미지를 읽을 수 없습니다'); return; }
+      if (valid.length === 0) { setAnalyzeStatus('이미지를 읽을 수 없습니다'); return; }
 
+      setAnalyzeStatus(`사진 ${valid.length}장 분석 중...`);
       const res = await fetch(`${API_URL}/workouts/from-image`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ images: valid }),
       });
-      const data = await res.json();
-      if (data.error) { Alert.alert('인식 실패', data.error); return; }
+      const text = await res.text();
+      let data: any;
+      try { data = JSON.parse(text); } catch { setAnalyzeStatus(`서버 응답 오류: ${text.slice(0, 100)}`); return; }
+
+      if (data.error) { setAnalyzeStatus(`인식 실패: ${data.error}`); return; }
 
       wodStorage.save([data.movements, data.notes].filter(Boolean).join('\n'));
+      setAnalyzeStatus(null);
       setDate(todayString());
       setWodName(data.wod_name ?? '');
       setResultType(data.result_type ?? 'time');
       setResultValue('');
       setNotes(data.movements ?? '');
       setModalVisible(true);
-    } catch {
-      Alert.alert('오류', '이미지 분석에 실패했습니다');
+    } catch (err: any) {
+      setAnalyzeStatus(`오류: ${err?.message ?? '알 수 없는 오류'}`);
     } finally {
       setAnalyzing(false);
     }
@@ -181,6 +188,17 @@ export default function WorkoutScreen() {
           <Text style={styles.addBtnText}>기록 추가</Text>
         </TouchableOpacity>
       </View>
+
+      {analyzeStatus ? (
+        <View style={styles.statusBar}>
+          <Text style={styles.statusText}>{analyzeStatus}</Text>
+          {!analyzing && (
+            <TouchableOpacity onPress={() => setAnalyzeStatus(null)}>
+              <Ionicons name="close" size={16} color="#aaa" />
+            </TouchableOpacity>
+          )}
+        </View>
+      ) : null}
 
       {loading ? (
         <View style={styles.center}>
@@ -301,6 +319,12 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: '#1A1A1A',
   },
   headerTitle: { fontSize: 17, fontWeight: '700', color: '#fff', flex: 1 },
+  statusBar: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingVertical: 10,
+    backgroundColor: '#1A1A1A', borderBottomWidth: 1, borderBottomColor: '#2A2A2A',
+  },
+  statusText: { color: '#aaa', fontSize: 13, flex: 1 },
   photoBtn: {
     width: 36, height: 36, borderRadius: 8,
     backgroundColor: '#1A1A1A', borderWidth: 1, borderColor: '#2A2A2A',
