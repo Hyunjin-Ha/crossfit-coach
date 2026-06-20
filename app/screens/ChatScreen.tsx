@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
   ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator, Image,
+  Modal, Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { getDeviceId, wodStorage } from '../storage';
@@ -19,7 +20,17 @@ type Mode = 'chat' | 'benchmark_intake';
 
 const QUICK_PROMPTS = ['오늘 WOD 전략 알려줘', '스케일링 옵션은?', '운동 후 회복 방법', '단백질 섭취 조언'];
 
-// localStorage에서 동기로 읽기 (웹 새로고침 대응)
+const RESULT_TYPES = [
+  { key: 'time', label: '시간', placeholder: '예: 12:34' },
+  { key: 'rounds', label: '라운드', placeholder: '예: 13+5' },
+  { key: 'weight', label: '무게', placeholder: '예: 100kg' },
+  { key: 'score', label: '점수', placeholder: '예: 250' },
+];
+
+function todayString() {
+  return new Date().toISOString().split('T')[0];
+}
+
 function loadMessages(): Message[] {
   try {
     const raw = localStorage.getItem(CHAT_KEY);
@@ -46,7 +57,16 @@ export default function ChatScreen() {
   const scrollRef = useRef<ScrollView>(null);
   const chatBackupRef = useRef<Message[]>([]);
 
-  // 메시지 바뀔 때마다 무조건 저장
+  // WOD 저장 관련 상태
+  const [extracting, setExtracting] = useState(false);
+  const [saveModal, setSaveModal] = useState(false);
+  const [saveDate, setSaveDate] = useState(todayString());
+  const [saveWodName, setSaveWodName] = useState('');
+  const [saveResultType, setSaveResultType] = useState('time');
+  const [saveResultValue, setSaveResultValue] = useState('');
+  const [saveNotes, setSaveNotes] = useState('');
+  const [saving, setSaving] = useState(false);
+
   useEffect(() => {
     if (mode === 'chat' && messages.length > 0) {
       try { localStorage.setItem(CHAT_KEY, JSON.stringify(messages)); } catch {}
@@ -54,14 +74,13 @@ export default function ChatScreen() {
   }, [messages, mode]);
 
   useEffect(() => {
-    // 서버 웜업 핑 (Render 무료 콜드스타트 대비)
     const pingTimer = setTimeout(() => setServerStatus('slow'), 4000);
     fetch(`${API_URL}/`).then(() => {
       clearTimeout(pingTimer);
       setServerStatus('ready');
     }).catch(() => {
       clearTimeout(pingTimer);
-      setServerStatus('ready'); // 실패해도 시도는 해봄
+      setServerStatus('ready');
     });
 
     getDeviceId().then(async id => {
@@ -118,7 +137,6 @@ export default function ChatScreen() {
     const files: File[] = Array.from(e.target.files ?? []);
     e.target.value = '';
     if (files.length === 0) return;
-    // 첫 번째 사진은 미리보기용 URI, 나머지는 base64로 일괄 변환
     const readers = files.map(file => new Promise<{ uri: string; base64: string; mediaType: string } | null>(resolve => {
       const reader = new FileReader();
       reader.onload = () => {
@@ -133,6 +151,72 @@ export default function ChatScreen() {
       const valid = results.filter(Boolean) as { uri: string; base64: string; mediaType: string }[];
       if (valid.length > 0) setPendingImages(valid);
     });
+  }
+
+  // WOD 사진 → 운동기록 저장 흐름
+  function handleWodImageFile(e: any) {
+    const files: File[] = Array.from(e.target.files ?? []);
+    e.target.value = '';
+    if (files.length === 0) return;
+
+    setExtracting(true);
+    const readers = files.map(file => new Promise<{ image_base64: string; media_type: string } | null>(resolve => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const match = (reader.result as string).match(/^data:([^;]+);base64,(.+)$/);
+        resolve(match ? { image_base64: match[2], media_type: match[1] } : null);
+      };
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(file);
+    }));
+
+    Promise.all(readers).then(async results => {
+      const valid = results.filter(Boolean) as { image_base64: string; media_type: string }[];
+      if (valid.length === 0) { setExtracting(false); return; }
+      try {
+        const res = await fetch(`${API_URL}/workouts/from-image`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ images: valid }),
+        });
+        const data = await res.json();
+        if (data.error) { Alert.alert('인식 실패', data.error); return; }
+        setSaveDate(todayString());
+        setSaveWodName(data.wod_name ?? '');
+        setSaveResultType(data.result_type ?? 'time');
+        setSaveResultValue('');
+        setSaveNotes([data.movements, data.notes].filter(Boolean).join('\n'));
+        setSaveModal(true);
+      } catch (err: any) {
+        Alert.alert('오류', err?.message ?? 'WOD 인식에 실패했습니다');
+      } finally {
+        setExtracting(false);
+      }
+    });
+  }
+
+  async function handleSaveWorkout() {
+    if (!saveDate) return;
+    setSaving(true);
+    try {
+      await fetch(`${API_URL}/workouts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          date: saveDate,
+          wod_name: saveWodName.trim() || null,
+          result_type: saveResultValue.trim() ? saveResultType : null,
+          result_value: saveResultValue.trim() || null,
+          notes: saveNotes.trim() || null,
+        }),
+      });
+      setSaveModal(false);
+      Alert.alert('저장 완료', '운동기록 탭에서 확인하세요!');
+    } catch {
+      Alert.alert('오류', '저장에 실패했습니다');
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function send(text?: string) {
@@ -200,6 +284,8 @@ export default function ChatScreen() {
       setLoading(false);
     }
   }
+
+  const savePlaceholder = RESULT_TYPES.find(t => t.key === saveResultType)?.placeholder ?? '';
 
   return (
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -284,6 +370,19 @@ export default function ChatScreen() {
             })}
           </View>
         )}
+        {mode === 'chat' && (
+          <View style={styles.wodSaveBtn}>
+            {extracting
+              ? <ActivityIndicator size="small" color="#FF6B35" />
+              : <Ionicons name="clipboard-outline" size={20} color="#FF6B35" />
+            }
+            {!extracting && React.createElement('input', {
+              type: 'file', accept: 'image/*',
+              onChange: handleWodImageFile,
+              style: { position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' },
+            })}
+          </View>
+        )}
         <TextInput
           style={styles.input}
           value={input}
@@ -301,6 +400,78 @@ export default function ChatScreen() {
           <Ionicons name="send" size={18} color="#fff" />
         </TouchableOpacity>
       </View>
+
+      {/* WOD 기록 저장 모달 */}
+      <Modal visible={saveModal} animationType="slide" transparent>
+        <View style={styles.overlay}>
+          <View style={styles.sheet}>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <Text style={styles.sheetTitle}>WOD 기록 저장</Text>
+
+              <Text style={styles.label}>날짜</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={saveDate}
+                onChangeText={setSaveDate}
+                placeholder="YYYY-MM-DD"
+                placeholderTextColor="#444"
+              />
+
+              <Text style={styles.label}>WOD 이름 (선택)</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={saveWodName}
+                onChangeText={setSaveWodName}
+                placeholder="예: Fran, 6월 20일 WOD..."
+                placeholderTextColor="#444"
+              />
+
+              <Text style={styles.label}>인식된 WOD 내용</Text>
+              <TextInput
+                style={[styles.modalInput, styles.modalInputMulti]}
+                value={saveNotes}
+                onChangeText={setSaveNotes}
+                multiline
+                placeholderTextColor="#444"
+              />
+
+              <Text style={styles.label}>결과 유형</Text>
+              <View style={styles.typeRow}>
+                {RESULT_TYPES.map(t => (
+                  <TouchableOpacity
+                    key={t.key}
+                    style={[styles.typeBtn, saveResultType === t.key && styles.typeBtnActive]}
+                    onPress={() => setSaveResultType(t.key)}
+                  >
+                    <Text style={[styles.typeBtnText, saveResultType === t.key && styles.typeBtnTextActive]}>
+                      {t.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <Text style={styles.label}>내 결과 (선택)</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={saveResultValue}
+                onChangeText={setSaveResultValue}
+                placeholder={savePlaceholder}
+                placeholderTextColor="#444"
+              />
+
+              <TouchableOpacity style={styles.saveBtn} onPress={handleSaveWorkout} disabled={saving}>
+                {saving
+                  ? <ActivityIndicator color="#fff" size="small" />
+                  : <Text style={styles.saveBtnText}>운동기록에 저장</Text>
+                }
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => setSaveModal(false)}>
+                <Text style={styles.cancelBtnText}>취소</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -357,6 +528,12 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
     overflow: 'hidden',
   },
+  wodSaveBtn: {
+    width: 42, height: 42, borderRadius: 21,
+    backgroundColor: '#1A0A00', borderWidth: 1, borderColor: '#FF6B35',
+    alignItems: 'center', justifyContent: 'center',
+    overflow: 'hidden',
+  },
   input: {
     flex: 1, backgroundColor: '#1A1A1A', borderRadius: 22,
     paddingHorizontal: 16, paddingVertical: 10, color: '#fff',
@@ -370,4 +547,34 @@ const styles = StyleSheet.create({
     backgroundColor: '#1A0A00', borderBottomWidth: 1, borderBottomColor: '#2A1A00',
   },
   pingText: { color: '#FF6B35', fontSize: 12, flex: 1 },
+  // 모달
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'flex-end' },
+  sheet: {
+    backgroundColor: '#0D0D0D', borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    padding: 24, maxHeight: '90%',
+  },
+  sheetTitle: { color: '#fff', fontSize: 20, fontWeight: '800', marginBottom: 20 },
+  label: { color: '#555', fontSize: 13, marginBottom: 6, marginTop: 14 },
+  modalInput: {
+    backgroundColor: '#1A1A1A', borderRadius: 12,
+    paddingHorizontal: 14, paddingVertical: 12,
+    color: '#fff', fontSize: 15, borderWidth: 1, borderColor: '#2A2A2A',
+  },
+  modalInputMulti: { minHeight: 100, textAlignVertical: 'top' },
+  typeRow: { flexDirection: 'row', gap: 8 },
+  typeBtn: {
+    flex: 1, paddingVertical: 10, borderRadius: 10,
+    backgroundColor: '#1A1A1A', alignItems: 'center',
+    borderWidth: 1, borderColor: '#2A2A2A',
+  },
+  typeBtnActive: { backgroundColor: '#FF6B35', borderColor: '#FF6B35' },
+  typeBtnText: { color: '#555', fontSize: 13, fontWeight: '600' },
+  typeBtnTextActive: { color: '#fff' },
+  saveBtn: {
+    marginTop: 24, backgroundColor: '#FF6B35',
+    borderRadius: 14, paddingVertical: 14, alignItems: 'center',
+  },
+  saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  cancelBtn: { paddingVertical: 14, alignItems: 'center' },
+  cancelBtnText: { color: '#555', fontSize: 15 },
 });
