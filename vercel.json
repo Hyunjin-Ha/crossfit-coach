@@ -1,0 +1,6 @@
+{
+  "buildCommand": "cd app && npx expo export --platform web",
+  "outputDirectory": "app/dist",
+  "framework": null,
+  "installCommand": "cd app && npm install"
+}

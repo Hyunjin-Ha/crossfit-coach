@@ -193,6 +193,7 @@ export default function ChatScreen() {
         <Text style={styles.headerTitle}>
           {mode === 'benchmark_intake' ? '벤치마크 인테이크' : 'AI 코치'}
         </Text>
+        <Text style={{ color: '#333', fontSize: 10 }}>v0620</Text>
         {mode === 'chat' ? (
           <TouchableOpacity style={styles.benchmarkBtn} onPress={startBenchmark}>
             <Text style={styles.benchmarkBtnText}>벤치마크</Text>
