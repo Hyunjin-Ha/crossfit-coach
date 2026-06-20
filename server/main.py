@@ -5,6 +5,7 @@ from pydantic import BaseModel
 import anthropic
 import os
 import json
+import re
 from dotenv import load_dotenv
 from supabase import create_client, Client
 
@@ -199,10 +200,19 @@ def extract_wod_from_image(req: ImageAnalyzeRequest):
         max_tokens=512,
         messages=[{"role": "user", "content": content}],
     )
+    text = response.content[0].text
+    # 마크다운 코드블록 제거 후 JSON 추출
     try:
-        return json.loads(response.content[0].text)
+        return json.loads(text)
     except Exception:
-        return {"error": "WOD 파싱에 실패했습니다"}
+        pass
+    match = re.search(r'\{.*\}', text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except Exception:
+            pass
+    return {"error": f"파싱 실패: {text[:200]}"}
 
 
 def build_context(profile: dict | None) -> str:
