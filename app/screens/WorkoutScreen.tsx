@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, FlatList,
   Modal, TextInput, Alert, ActivityIndicator, ScrollView,
@@ -46,7 +46,6 @@ export default function WorkoutScreen() {
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -76,35 +75,34 @@ export default function WorkoutScreen() {
     setModalVisible(true);
   }
 
-  function fileToBase64(file: File): Promise<{ image_base64: string; media_type: string } | null> {
-    return new Promise(resolve => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const dataUrl = reader.result as string;
-        const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
-        resolve(match ? { image_base64: match[2], media_type: match[1] } : null);
-      };
-      reader.onerror = () => resolve(null);
-      reader.readAsDataURL(file);
-    });
-  }
+  async function handleFileChange(e: any) {
+    const files: File[] = Array.from(e.target.files ?? []);
+    e.target.value = '';
+    if (files.length === 0) return;
 
-  async function analyzeImages(images: { image_base64: string; media_type: string }[]) {
     setAnalyzing(true);
     try {
+      const images = await Promise.all(files.map(file => new Promise<{ image_base64: string; media_type: string } | null>(resolve => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const match = (reader.result as string).match(/^data:([^;]+);base64,(.+)$/);
+          resolve(match ? { image_base64: match[2], media_type: match[1] } : null);
+        };
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(file);
+      })));
+      const valid = images.filter(Boolean) as { image_base64: string; media_type: string }[];
+      if (valid.length === 0) { Alert.alert('오류', '이미지를 읽을 수 없습니다'); return; }
+
       const res = await fetch(`${API_URL}/workouts/from-image`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ images }),
+        body: JSON.stringify({ images: valid }),
       });
       const data = await res.json();
-      if (data.error) {
-        Alert.alert('인식 실패', data.error);
-        return;
-      }
-      const wodText = [data.movements, data.notes].filter(Boolean).join('\n');
-      wodStorage.save(wodText);
+      if (data.error) { Alert.alert('인식 실패', data.error); return; }
 
+      wodStorage.save([data.movements, data.notes].filter(Boolean).join('\n'));
       setDate(todayString());
       setWodName(data.wod_name ?? '');
       setResultType(data.result_type ?? 'time');
@@ -116,32 +114,6 @@ export default function WorkoutScreen() {
     } finally {
       setAnalyzing(false);
     }
-  }
-
-  function handleImagePick() {
-    if (!fileInputRef.current) {
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.accept = 'image/*';
-      input.multiple = true;
-      input.style.cssText = 'display:none;position:fixed;top:-100px';
-      document.body.appendChild(input);
-      fileInputRef.current = input;
-    }
-    const input = fileInputRef.current;
-    input.value = '';
-    input.onchange = async () => {
-      const files = Array.from(input.files ?? []);
-      if (files.length === 0) return;
-      const converted = await Promise.all(files.map(fileToBase64));
-      const images = converted.filter(Boolean) as { image_base64: string; media_type: string }[];
-      if (images.length === 0) {
-        Alert.alert('오류', '이미지를 읽을 수 없습니다');
-        return;
-      }
-      await analyzeImages(images);
-    };
-    input.click();
   }
 
   async function handleSave() {
@@ -193,12 +165,17 @@ export default function WorkoutScreen() {
       <View style={styles.header}>
         <Ionicons name="barbell-outline" size={20} color="#FF6B35" />
         <Text style={styles.headerTitle}>운동 기록</Text>
-        <TouchableOpacity style={styles.photoBtn} onPress={handleImagePick} disabled={analyzing}>
+        <View style={styles.photoBtn}>
           {analyzing
             ? <ActivityIndicator size="small" color="#FF6B35" />
             : <Ionicons name="camera-outline" size={20} color="#FF6B35" />
           }
-        </TouchableOpacity>
+          {!analyzing && React.createElement('input', {
+            type: 'file', accept: 'image/*', multiple: true,
+            onChange: handleFileChange,
+            style: { position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' },
+          })}
+        </View>
         <TouchableOpacity style={styles.addBtn} onPress={openModal}>
           <Ionicons name="add" size={20} color="#FF6B35" />
           <Text style={styles.addBtnText}>기록 추가</Text>
@@ -328,6 +305,7 @@ const styles = StyleSheet.create({
     width: 36, height: 36, borderRadius: 8,
     backgroundColor: '#1A1A1A', borderWidth: 1, borderColor: '#2A2A2A',
     alignItems: 'center', justifyContent: 'center',
+    overflow: 'hidden',
   },
   addBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
