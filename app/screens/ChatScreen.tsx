@@ -42,6 +42,7 @@ export default function ChatScreen() {
   const [deviceId, setDeviceId] = useState<string | null>(null);
   const [benchmarkSaved, setBenchmarkSaved] = useState(false);
   const [pendingImages, setPendingImages] = useState<{ uri: string; base64: string; mediaType: string }[]>([]);
+  const [serverStatus, setServerStatus] = useState<'checking' | 'ready' | 'slow'>('checking');
   const scrollRef = useRef<ScrollView>(null);
   const chatBackupRef = useRef<Message[]>([]);
 
@@ -53,6 +54,16 @@ export default function ChatScreen() {
   }, [messages, mode]);
 
   useEffect(() => {
+    // 서버 웜업 핑 (Render 무료 콜드스타트 대비)
+    const pingTimer = setTimeout(() => setServerStatus('slow'), 4000);
+    fetch(`${API_URL}/`).then(() => {
+      clearTimeout(pingTimer);
+      setServerStatus('ready');
+    }).catch(() => {
+      clearTimeout(pingTimer);
+      setServerStatus('ready'); // 실패해도 시도는 해봄
+    });
+
     getDeviceId().then(async id => {
       setDeviceId(id);
       try {
@@ -153,6 +164,10 @@ export default function ChatScreen() {
           ...(imagesToSend.length > 0 ? { images: imagesToSend.map(i => ({ image_base64: i.base64, image_media_type: i.mediaType })) } : {}),
         }),
       });
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        throw new Error(`서버 오류 ${res.status}: ${errText.slice(0, 200)}`);
+      }
       if (!res.body) throw new Error('no body');
 
       const reader = res.body.getReader();
@@ -202,6 +217,13 @@ export default function ChatScreen() {
           <View style={styles.recordingDot} />
         )}
       </View>
+
+      {serverStatus === 'slow' && (
+        <View style={styles.pingBanner}>
+          <ActivityIndicator size="small" color="#FF6B35" />
+          <Text style={styles.pingText}>서버 시작 중... (첫 요청은 30초 걸릴 수 있어요)</Text>
+        </View>
+      )}
 
       <ScrollView ref={scrollRef} style={styles.messages} contentContainerStyle={styles.messagesContent}>
         {messages.map(msg => (
@@ -342,4 +364,10 @@ const styles = StyleSheet.create({
   },
   sendBtn: { backgroundColor: '#FF6B35', width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
   sendBtnDisabled: { backgroundColor: '#333' },
+  pingBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingHorizontal: 16, paddingVertical: 10,
+    backgroundColor: '#1A0A00', borderBottomWidth: 1, borderBottomColor: '#2A1A00',
+  },
+  pingText: { color: '#FF6B35', fontSize: 12, flex: 1 },
 });

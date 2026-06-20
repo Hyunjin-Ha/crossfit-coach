@@ -237,8 +237,11 @@ def build_context(profile: dict | None) -> str:
 def chat(request: ChatRequest):
     profile = None
     if request.device_id and request.mode != "benchmark_intake":
-        res = supabase.table("athlete_profiles").select("benchmark").eq("device_id", request.device_id).maybe_single().execute()
-        profile = res.data
+        try:
+            res = supabase.table("athlete_profiles").select("benchmark").eq("device_id", request.device_id).maybe_single().execute()
+            profile = res.data
+        except Exception:
+            pass
 
     if request.mode == "benchmark_intake":
         system = BENCHMARK_PROMPT
