@@ -200,7 +200,7 @@ def extract_wod_from_image(req: ImageAnalyzeRequest):
         model="claude-sonnet-4-6",
         max_tokens=1024,
         tools=[WOD_EXTRACT_TOOL],
-        tool_choice={"type": "required", "name": "extract_wod"},
+        tool_choice={"type": "tool", "name": "extract_wod"},
         messages=[{"role": "user", "content": content}],
     )
     for block in response.content:
@@ -247,27 +247,25 @@ def chat(request: ChatRequest):
         wod_ctx = f"\n\n[오늘의 WOD]\n{request.wod_context}" if request.wod_context else ""
         system = SYSTEM_PROMPT + (f"\n\n{context}" if context else "") + wod_ctx
 
-    def build_messages():
-        msgs = []
-        for i, m in enumerate(request.messages):
-            is_last_user = (i == len(request.messages) - 1 and m.role == "user")
-            if is_last_user and request.images:
-                content = [
-                    {"type": "image", "source": {"type": "base64", "media_type": img.get("image_media_type", "image/jpeg"), "data": img["image_base64"]}}
-                    for img in request.images
-                ]
-                content.append({"type": "text", "text": m.content or "이 WOD 분석해줘"})
-                msgs.append({"role": "user", "content": content})
-            else:
-                msgs.append({"role": m.role, "content": m.content})
-        return msgs
+    claude_messages = []
+    for i, m in enumerate(request.messages):
+        is_last_user = (i == len(request.messages) - 1 and m.role == "user")
+        if is_last_user and request.images:
+            content = [
+                {"type": "image", "source": {"type": "base64", "media_type": img.get("image_media_type", "image/jpeg"), "data": img["image_base64"]}}
+                for img in request.images
+            ]
+            content.append({"type": "text", "text": m.content or "이 WOD 분석해줘"})
+            claude_messages.append({"role": "user", "content": content})
+        else:
+            claude_messages.append({"role": m.role, "content": m.content})
 
     def generate():
         with claude.messages.stream(
             model="claude-sonnet-4-6",
             max_tokens=2048,
             system=system,
-            messages=build_messages(),
+            messages=claude_messages,
         ) as stream:
             for text in stream.text_stream:
                 yield text
