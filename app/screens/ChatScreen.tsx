@@ -176,9 +176,10 @@ export default function ChatScreen() {
         const final = withNew.map(m => m.id === assistantId ? { ...m, content: accumulated } : m);
         saveMessages(final);
       }
-    } catch {
+    } catch (err: any) {
+      const errMsg = err?.message ?? String(err) ?? '알 수 없는 오류';
       setMessages(prev => prev.map(m =>
-        m.id === assistantId ? { ...m, content: '연결 오류가 발생했어요. 서버를 확인해주세요.' } : m
+        m.id === assistantId ? { ...m, content: `오류: ${errMsg}\nURL: ${API_URL}` } : m
       ));
     } finally {
       setLoading(false);
