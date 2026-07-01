@@ -208,30 +208,44 @@ export default function ChatScreen() {
     });
   }
 
-  async function handleSaveAll() {
-    setSavingAll(true);
-    try {
-      const results = await Promise.all(sessions.map(s =>
-        fetch(`${API_URL}/workouts`, {
+  async function saveOneSession(s: WodSession, retries = 2): Promise<Response> {
+    const body = JSON.stringify({
+      date: s.date,
+      wod_name: s.wod_name.trim() || null,
+      result_type: s.result_value.trim() ? s.result_type : null,
+      result_value: s.result_value.trim() || null,
+      notes: s.notes.trim() || null,
+    });
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const res = await fetch(`${API_URL}/workouts`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            date: s.date,
-            wod_name: s.wod_name.trim() || null,
-            result_type: s.result_value.trim() ? s.result_type : null,
-            result_value: s.result_value.trim() || null,
-            notes: s.notes.trim() || null,
-          }),
-        })
-      ));
+          body,
+        });
+        return res;
+      } catch (err) {
+        if (attempt === retries) throw err;
+        await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+      }
+    }
+    throw new Error('unreachable');
+  }
+
+  async function handleSaveAll() {
+    setSavingAll(true);
+    const count = sessions.length;
+    try {
+      const results = await Promise.all(sessions.map(s => saveOneSession(s)));
       const failed = results.filter(r => !r.ok);
       if (failed.length > 0) {
-        window.alert(`일부 저장 실패: ${failed.length}개`);
+        const errText = await failed[0].text().catch(() => '');
+        window.alert(`저장 실패 (${failed.length}개): ${errText.slice(0, 100)}`);
         return;
       }
       setSessions([]);
       setSaveModal(false);
-      window.alert(`${sessions.length}개 세션 저장 완료!`);
+      window.alert(`${count}개 세션 저장 완료!`);
     } catch (err: any) {
       window.alert(`저장 오류: ${err?.message ?? '알 수 없는 오류'}`);
     } finally {
