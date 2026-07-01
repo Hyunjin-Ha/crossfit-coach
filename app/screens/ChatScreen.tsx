@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
   ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator, Image,
-  Modal, Alert,
+  Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { getDeviceId, wodStorage } from '../storage';
@@ -197,11 +197,11 @@ export default function ChatScreen() {
           result_value: '',
           notes: [s.movements, s.notes].filter(Boolean).join('\n'),
         }));
-        if (newSessions.length === 0) { Alert.alert('인식 실패', 'WOD를 찾을 수 없습니다'); return; }
+        if (newSessions.length === 0) { window.alert('WOD를 찾을 수 없습니다'); return; }
         setSessions(prev => [...prev, ...newSessions]);
         setSaveModal(true);
       } catch (err: any) {
-        Alert.alert('오류', err?.message ?? 'WOD 인식에 실패했습니다');
+        window.alert(`WOD 인식 오류: ${err?.message ?? '알 수 없는 오류'}`);
       } finally {
         setExtracting(false);
       }
@@ -211,7 +211,7 @@ export default function ChatScreen() {
   async function handleSaveAll() {
     setSavingAll(true);
     try {
-      await Promise.all(sessions.map(s =>
+      const results = await Promise.all(sessions.map(s =>
         fetch(`${API_URL}/workouts`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -224,10 +224,16 @@ export default function ChatScreen() {
           }),
         })
       ));
+      const failed = results.filter(r => !r.ok);
+      if (failed.length > 0) {
+        window.alert(`일부 저장 실패: ${failed.length}개`);
+        return;
+      }
+      setSessions([]);
       setSaveModal(false);
-      Alert.alert('저장 완료', `${sessions.length}개 세션을 운동기록에 저장했습니다!`);
-    } catch {
-      Alert.alert('오류', '저장에 실패했습니다');
+      window.alert(`${sessions.length}개 세션 저장 완료!`);
+    } catch (err: any) {
+      window.alert(`저장 오류: ${err?.message ?? '알 수 없는 오류'}`);
     } finally {
       setSavingAll(false);
     }
