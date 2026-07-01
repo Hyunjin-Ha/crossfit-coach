@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -6,6 +6,7 @@ import anthropic
 import os
 import json
 import re
+import time
 from dotenv import load_dotenv
 from supabase import create_client, Client
 
@@ -22,6 +23,19 @@ app.add_middleware(
 
 claude = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
+
+
+def sb(fn, retries=3, delay=1.5):
+    """Render free tier cold-start 후 DNS 실패를 retry로 처리."""
+    last_err = None
+    for i in range(retries):
+        try:
+            return fn()
+        except Exception as e:
+            last_err = e
+            if i < retries - 1:
+                time.sleep(delay)
+    raise HTTPException(status_code=503, detail=f"DB 연결 실패: {last_err}")
 
 SYSTEM_PROMPT = """당신은 전문 크로스핏 AI 코치입니다. 선수의 실력 데이터를 기반으로 구체적인 처방을 내립니다.
 
@@ -128,7 +142,7 @@ def root():
 
 @app.get("/profile/{device_id}")
 def get_profile(device_id: str):
-    res = supabase.table("athlete_profiles").select("*").eq("device_id", device_id).maybe_single().execute()
+    res = sb(lambda: supabase.table("athlete_profiles").select("*").eq("device_id", device_id).maybe_single().execute())
     return {"profile": res.data}
 
 
@@ -144,10 +158,10 @@ def save_profile(req: ProfileSaveRequest):
     except Exception:
         benchmark = {"raw_summary": req.summary}
 
-    supabase.table("athlete_profiles").upsert(
+    sb(lambda: supabase.table("athlete_profiles").upsert(
         {"device_id": req.device_id, "benchmark": benchmark},
         on_conflict="device_id",
-    ).execute()
+    ).execute())
 
     return {"ok": True, "benchmark": benchmark}
 
@@ -170,25 +184,25 @@ WOD_EXTRACT_TOOL = {
 
 @app.get("/workouts")
 def get_workouts():
-    res = supabase.table("workout_logs").select("*").order("date", desc=True).execute()
+    res = sb(lambda: supabase.table("workout_logs").select("*").order("date", desc=True).execute())
     return res.data
 
 
 @app.post("/workouts")
 def create_workout(log: WorkoutLogCreate):
-    res = supabase.table("workout_logs").insert(log.model_dump()).execute()
+    res = sb(lambda: supabase.table("workout_logs").insert(log.model_dump()).execute())
     return res.data[0]
 
 
 @app.patch("/workouts/{log_id}")
 def update_workout(log_id: str, log: WorkoutLogCreate):
-    res = supabase.table("workout_logs").update(log.model_dump()).eq("id", log_id).execute()
+    res = sb(lambda: supabase.table("workout_logs").update(log.model_dump()).eq("id", log_id).execute())
     return res.data[0]
 
 
 @app.delete("/workouts/{log_id}")
 def delete_workout(log_id: str):
-    supabase.table("workout_logs").delete().eq("id", log_id).execute()
+    sb(lambda: supabase.table("workout_logs").delete().eq("id", log_id).execute())
     return {"ok": True}
 
 
